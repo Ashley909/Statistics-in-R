@@ -1,0 +1,544 @@
+---
+title: "_20MAP501_ Statistics"
+subtitle: 'CourseWork'
+author: "B614677"
+date: "18th December, 2020"
+number_sections: yes
+hightlight: pygments
+theme: cerulean
+df_print: paged
+output: word_document
+---
+
+# Preamble 
+```{r, collapse = TRUE, error = FALSE, warning = FALSE, results = 'hide'}
+# preparing the workspace:
+# downloading necessary libraries
+
+library(rio)
+library(dplyr)
+library(plyr)
+library(tidyr)
+library(magrittr)
+library(ggplot2)
+library(pROC)
+library(AmesHousing)
+library(tidyverse)
+library(here)
+library(lubridate)
+library(janitor)
+library(rsq)
+library(MASS)
+library(sandwich)
+library(investr)
+library(glmnet)
+library(caret)
+library(lme4)
+library(nnet)
+```
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating clean version of ames housing
+
+ames <- make_ames()
+ames <- as.tibble(ames)
+ames <- clean_names(ames)
+ames <- ames[complete.cases(ames),]
+```
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# Importing relevant datasets, relative paths
+
+playerstats <- read_csv(here("data", "england-premier-league-players-2018-to-2019-stats.csv"))
+playerstats <- as.tibble(playerstats)
+```
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# cleaning playerstats 
+playerstats <- clean_names(playerstats)
+```
+
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# certain columns need changing to as factors
+
+playerstats$full_name <- as.factor(playerstats$full_name)
+playerstats$league <- as.factor(playerstats$league)
+playerstats$season <- as.factor(playerstats$season)
+playerstats$current_club <- as.factor(playerstats$current_club)
+playerstats$position <- as.factor(playerstats$position)
+playerstats$nationality <- as.factor(playerstats$nationality)
+playerstats
+```
+
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# removing cases 
+
+playerstats <- playerstats[!playerstats$age < 10,]
+playerstats
+```
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating a new variable
+
+playerstats$played <- playerstats$minutes_played_overall
+playerstats$played[playerstats$played > 0] <- "plus 0 minutes played"
+playerstats$played[playerstats$played == 0] <- "0 minutes played"
+playerstats$played <- as.factor(playerstats$played)
+playerstats
+```
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating a new dataset 
+
+football <- playerstats
+football <- football %>% 
+  filter(played == "plus 0 minutes played")
+```
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating a new dataset 
+# eliminating certain elements
+# dropping unused levels within dataset 
+
+footballngk <- football[football$position !="Goalkeeper",]
+footballngk$position <- droplevels(footballngk$position)
+footballngk
+```
+
+# Linear Regression
+
+**2. a)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# investigating the lot area from the dataset ames
+
+summary(ames$lot_area)
+
+# constructing a visualisation of the entire dataset
+hist(ames$lot_area, col = "orange",
+     xlab = expression(Total ~ Lot ~ Area~ (ft^2)),
+     ylab = "Number of Houses",
+     xlim = range(0:50000),
+     breaks = 200,
+     main = "Histogram of House Frequency vs Lot Area ",
+     sub = "Figure 1"
+     )
+
+```
+As seen from Figure 1, the number of houses that have a lot area greater than 30,000 m2 are very insignificant.
+Thus deleting properties with a lot area greater than 30,000 m2 is ideal in gaining concise analysis. 
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating a new dataset
+
+
+ames2 <- ames %>% filter(lot_area <= 30000)
+summary(ames2$lot_area)
+ames2
+```
+**2. b)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# removing certain cases 
+
+ames2 <- ames2 %>% filter(ms_zoning != "A_agr" & ms_zoning != "C_all" & ms_zoning != "I_all")
+ames2$ms_zoning <- factor(ames2$ms_zoning)
+```
+
+**2. c)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# simple plot to view relationship between variables
+plot(ames2$ms_zoning, ames2$lot_area, main = "A boxPlot of Property Zones vs Lot Area", las = 2,
+        sub = "Figure 2")
+```
+The x axis label categories on Figure 2 are (from left to right); Floating Village Residents,
+High Density residents, Low Density residents, Medium Density residents.
+
+**2. d)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# detailed plot to view relationship between variables
+
+plot(ames2$gr_liv_area, ames2$lot_area, col = as.numeric(ames2$ms_zoning),
+     main = "Relationship between Ground Living Area \n and Property Lot Area",
+     xlab = expression(Ground ~ Living ~ Area ~ (ft^2)),
+     ylab = expression(Property ~ Lot ~ Area ~ (ft^2)),
+     sub = "Figure 3"
+     )
+legend(2700, 31000, legend = levels(ames2$ms_zoning), fill = 1:4)
+```
+**2. e)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# detailed plot to view relationship between variables
+
+plot(jitter(ames2$garage_cars), ames2$lot_area, main = " Scatter of Garage Cars vs  Property Lot Area",
+     sub = "Figure 4")
+```
+**2. f)**
+
+The use of Figures 2, 3 and 4 are to predominantly search for outliers, strange values or very small numbers.
+Also to observe the general trend of the data.
+
+Most property lot areas are between 5,000 and 12,000 ft2.
+The highest  number of property lot areas are in the low density residential zone.
+Most property lot areas accommodate for two cars, additionally accommodating for four
+or five cars is very rare.   
+
+
+**2. g)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# building a linear model
+# lot_area as a function of its predictors
+
+linmod1<-lm(lot_area ~ ms_zoning + gr_liv_area, data = ames2)
+plot(linmod1) 
+```
+Evaluating the assumptions:
+
+The plot of residuals against the fitted values indicates a relative linear trend (red horizontal line),
+there are two clusters being roughly around 6,000 and 10,000 on the fitted values axis (x axis).
+
+The normal Q-Q plot depicts that the residuals are normally distributed with exception to the
+downward curve at the top right.
+
+Looking at the scale-location plot it would be ideal to see the red annotation line be 
+horizontally straight, with equally spaced points.
+The points seem to not follow this pattern and the data seems to show heteroscedasticity. 
+
+
+
+**2. h)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+linmod1
+```
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# building a second linear model
+# lot_area as a function of its predictors
+
+linmod2 <- lm(lot_area ~ ms_zoning + gr_liv_area + garage_cars,
+              data = ames2)
+linmod2
+```
+
+**2. i)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# using Anova and Adjusted R-squared for comparisons
+
+#anova
+anova(linmod1)
+anova(linmod2)
+```
+looking at the stars
+The anova analysis on the first linear model shows that the property zones and ground living area explanatory variables
+are significant in predicting the outcome variable of property lot area. 
+
+The anova analysis on the second linear model states that with the addition of the garage car space has
+a relative  sigificance in predicting the outcome variable of property lot area.
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# to gather the adjusted R squared values
+summary(linmod1)
+summary(linmod2)
+```
+The adjusted R-squared values for the first linear model and second linear model are, 30.8% and 31%
+respectively. 
+
+Therefore the second linear model is a better predictor for the outcome variable of property lot area, 
+however the difference is 1% which is tiny. It may be necessary to disregard the second linear model
+and use the first linear model as minimising the predictors means a simplified analysis.
+
+
+**2. j)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# confidence intervals and prediction intervals 
+
+linmod3 <- lm(lot_area ~ ms_zoning + garage_cars + gr_liv_area, data = ames2)
+
+predict(linmod3,
+        newdata = data.frame(ms_zoning = "Residential_High_Density",
+        garage_cars = 2, gr_liv_area = 1000), interval = "confidence")
+
+predict(linmod3,
+        newdata = data.frame(ms_zoning = "Residential_High_Density",
+        garage_cars = 2, gr_liv_area = 1000), interval = "prediction")
+```
+There is a relatively small range between the lower and upper confidence intervals, around 2,400.   
+
+The prediction intervals indicate a wide range between the lower and upper bounds,
+with a gap of around 12,500
+
+
+
+**2. k)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creation of a third model using the lmer function
+
+mmod1 <- lmer(lot_area ~ ms_zoning + gr_liv_area + garage_area + (1|neighborhood), data = ames2)
+mmod1
+```
+
+The intercept coefficient (being 747) and the residual value (being 2868) are of interest here and associated with the critical number.  
+
+
+**2. l)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# 95% confidence intervals around each parameter for mmod1
+
+confint(mmod1)
+```
+This tell us that the random effect is relatively insignificant, the results will lie between
+1,900 and 3,400 (looking at sigma01), this is a small range.
+
+
+**2. m)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+## Deriving mathematical equations
+
+summary(linmod2)
+summary(mmod1)
+```
+
+Mathematical model of linmod2,
+
+$$
+E(X) =1759 + 1355\times {\rm High\ Density\ Residents}\\+ 4141\times {\rm Low\ Density\ Residents} \\ + 725\times {\rm Medium\ Density\ Residents}\\+ 2\times {\rm Ground\ Living\ Area}\\ + 297\times {\rm Garage\ Cars}  
+$$
+
+Mathematical model of mmod1,
+
+$$
+E(X) =747 + 1826\times {\rm High\ Density\ Residents}\\+ 3778\times {\rm Low\ Density\ Residents} \\ + 357\times {\rm Medium\ Density\ Residents}\\+ 2\times {\rm Ground\ Living\ Area}\\ + 3\times {\rm Garage\ Cars}  
+$$
+**3. a)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating a logistic regression model 
+
+glmod1 <- glm(played ~ age + position, family = binomial, data = playerstats)
+glmod1
+```
+
+**3. b)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating new datasets for each position
+
+forward <- playerstats %>% filter(position == 'Forward')
+midfielder <- playerstats  %>% filter(position == 'Midfielder')
+defender <- playerstats %>% filter(position == 'Defender')
+goalkeeper <- playerstats %>% filter(position == 'Goalkeeper')
+```
+
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating the confidence bands for forwards
+
+glmod2 <- glm(played ~ age, data = forward, family = binomial)
+ilink <- family(glmod2)$linkinv
+
+newftb <- with(forward, data.frame(age = seq(min(forward$age),
+                                           max(forward$age),length = 100)))
+newftb <- cbind(newftb, predict(glmod2, newftb, 
+                               type = "link", se.fit = TRUE)[1:2])
+newftb <- transform(newftb, Fitted = ilink(fit), 
+                  Upper = ilink(fit + (1.96 * se.fit)),
+                  Lower = ilink(fit - (1.96 * se.fit)))
+```
+
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating the confidence bands for midfielders
+
+glmod3 <- glm(played ~ age, data = midfielder, family = binomial)
+ilink <- family(glmod3)$linkinv
+
+newftb2 <- with(midfielder, data.frame(age = seq(min(midfielder$age),
+                                           max(midfielder$age),length = 100)))
+newftb2 <- cbind(newftb2, predict(glmod3, newftb2, 
+                               type = "link", se.fit = TRUE)[1:2])
+newftb2 <- transform(newftb2, Fitted = ilink(fit), 
+                  Upper = ilink(fit + (1.96 * se.fit)),
+                  Lower = ilink(fit - (1.96 * se.fit)))
+```
+
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating the confidence bands for defenders
+
+glmod4 <- glm(played ~ age, data = defender, family = binomial)
+ilink <- family(glmod4)$linkinv
+
+newftb3 <- with(defender, data.frame(age = seq(min(defender$age),
+                                           max(defender$age),length = 100)))
+newftb3 <- cbind(newftb3, predict(glmod4, newftb3, 
+                               type = "link", se.fit = TRUE)[1:2])
+newftb3 <- transform(newftb3, Fitted = ilink(fit), 
+                  Upper = ilink(fit + (1.96 * se.fit)),
+                  Lower = ilink(fit - (1.96 * se.fit)))
+
+
+```
+
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating the confidence bands for goalkeepers
+
+glmod5 <- glm(played ~ age, data = goalkeeper, family = binomial)
+ilink <- family(glmod5)$linkinv
+
+newftb4 <- with(goalkeeper, data.frame(age = seq(min(goalkeeper$age),
+                                           max(goalkeeper$age),length = 100)))
+newftb4 <- cbind(newftb4, predict(glmod5, newftb4, 
+                               type = "link", se.fit = TRUE)[1:2])
+newftb4 <- transform(newftb4, Fitted = ilink(fit), 
+                  Upper = ilink(fit + (1.96 * se.fit)),
+                  Lower = ilink(fit - (1.96 * se.fit)))
+```
+
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+#plotting the likelihood of playing against age of the footballer positions 
+
+ggplot(playerstats, aes(x = age, y = as.numeric(played)), sub = "Figure 5") +
+  geom_ribbon(data = newftb, aes(ymin = Lower, ymax = Upper, x = age),
+              fill = "steelblue2", alpha = 0.25, inherit.aes = FALSE) + 
+  
+      geom_line(data = newftb, aes(y = Fitted, x = age), colour = "orange") +
+  geom_jitter(data = forward, height = 0.2, alpha = 0.55, width = 0, colour = "blue") +
+  geom_ribbon(data = newftb2, aes(ymin = Lower, ymax = Upper, x = age),
+              fill = "steelblue2", alpha = 0.25, inherit.aes = FALSE) + 
+  
+  geom_jitter(data = midfielder, height = 0.1, alpha = 0.55, width = 0, colour = "black") +
+      geom_line(data = newftb2, aes(y = Fitted, x = age), colour = "black") +
+  geom_ribbon(data = newftb3, aes(ymin = Lower, ymax = Upper, x = age),
+              fill = "steelblue2", alpha = 0.25, inherit.aes = FALSE) + 
+  
+      geom_line(data = newftb3, aes(y = Fitted, x = age), colour = "purple") +
+  geom_jitter(data = defender, height = 0.15, alpha = 0.55, width = 0, colour = "purple") +
+  geom_ribbon(data = newftb4, aes(ymin = Lower, ymax = Upper, x = age),
+              fill = "steelblue2", alpha = 0.25, inherit.aes = FALSE) + 
+  
+  geom_line(data = newftb4, aes(y = Fitted, x = age), colour = "red") +
+  geom_jitter(data = goalkeeper, height = 0.2, alpha = 0.55, width = 0, colour = "red") +
+  labs(y = "Likelihood of Playing", x = "Age",
+       title = "Illustration of the Relationship between \n Footballer Playing Time vs their Age")
+  
+#legend(35, 0.2, legend = c("forward", "midfielder", "defender", "goalkeeper"),
+#         fill = 1:4)
+```
+
+**3. c)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# rebuilding the model on 70% of the dataset and cross validating. 
+
+set.seed(123)
+training.sample <- c(playerstats$played) %>%
+  createDataPartition(p = 0.7, list = FALSE)
+
+train.data  <- playerstats[training.sample,]
+test.data <- playerstats[-training.sample, ]
+
+train.model <- glm(played ~ age + position, family = binomial, data = train.data)
+```
+
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# plotting the ROC curves for both data
+
+predtrain <- predict(train.model, type = 'response')
+predtest <- predict(train.model, newdata = test.data, type = 'response')
+
+roctrain <- roc(response = train.data$played,
+                predictor = predtrain, plot = TRUE,
+                main = "ROC Curve for Prediction\n of Footballers Playing")
+roc(response = test.data$played, predictor = predtest, plot = TRUE,
+    auc = TRUE, add = TRUE, col = 2)
+legend(0, 0.4, legend = c("Training", "Testing"), fill = 1:2)
+```
+
+**4. a)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating a prediction model 
+
+multregmod <- multinom(position ~ goals_per_90_overall + assists_per_90_overall + conceded_per_90_overall + cards_per_90_overall, data = footballngk)
+```
+
+**4. b)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# constructing formulas for this model 
+
+summary(multregmod)
+```
+P(Forward)
+$$
+{\rm logit}(P({\rm forward})) = -2.4 + 9.61\times{\rm  overall\ goals\ per\ 90}\\ + 3.9\times {\rm overall\ assists\ per\ 90}+ 0.33\times{\rm  overall\ conceded\ per\ 90}
+$$
+P(Midfielder)
+$$
+{\rm logit}(P({\rm midfielder})) = -0.45 + 4.81\times{\rm  overall\ goals\ per\ 90}\\ + 2.75\times {\rm overall\ assists\ per\ 90}+ 0.05\times{\rm  overall\ conceded\ per\ 90}
+$$
+
+**4. c)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# evaluating the performance of the model and sum of sensitivities
+
+multitable <- table(footballngk$position, predict(multregmod, type = "class"))
+names(dimnames(multitable)) <- list("Actual", "Predicted")
+multitable 
+
+ssens <- multitable[1, 1] / sum(footballngk$position == "Defender") +
+  multitable[2, 2] / sum(footballngk$position == "Forward") +
+  multitable[3, 3] / sum(footballngk$position == "Midfielder") 
+ssens
+```
+As the sensitivity is 1.63, this means that having constructed the model it's 63% more useful.  
+
+
+**5. a)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# creating a count model for predictions
+
+footballngk$total_cards <- footballngk$yellow_cards_overall + footballngk$red_cards_overall
+footballngk
+
+countmod <- glm(total_cards ~ appearances_overall + position, 
+                data = footballngk, family = "poisson")
+summary(countmod)
+```
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# checking findings with dianostic plots
+plot(countmod)
+abline(h = 0.8, col = 3)
+```
+On the scale vs location curve, the red line is above the set green line indicating that
+there is overdispersion.
+
+**5. c)**
+
+```{r, collapse = TRUE, error = FALSE, warning = FALSE}
+# studying coefficients 
+
+summary(countmod)
+```
+The coefficients tell us how likely a forward or a midfielder is to get carded compared to a defender.
+Defenders get carded the most, as a forward and midfielder are less likely to be shown as many cards
+as a defender for the same amount of time of play. 
+The forward coefficient (-0.64) and the midfielder coefficient (-0.08) are to the exponential and so
+the are carded significantly less than defenders.
